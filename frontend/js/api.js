@@ -49,15 +49,34 @@ const api = {
   /**
    * Upload video trực tiếp qua API Server lên MinIO (Tin cậy 100%, có thanh tiến trình %)
    */
-  uploadVideoDirect(formData, onProgress) {
+  uploadVideoDirect(fileOrFormData, metaOrProgress, onProgress) {
     return new Promise((resolve, reject) => {
+      let formData;
+      let progressCallback = onProgress;
+
+      if (fileOrFormData instanceof FormData) {
+        formData = fileOrFormData;
+        progressCallback = metaOrProgress;
+      } else {
+        formData = new FormData();
+        formData.append('file', fileOrFormData);
+        if (metaOrProgress && typeof metaOrProgress === 'object') {
+          if (metaOrProgress.title) formData.append('title', metaOrProgress.title);
+          if (metaOrProgress.description) formData.append('description', metaOrProgress.description);
+          if (metaOrProgress.tags) {
+            const tagsStr = Array.isArray(metaOrProgress.tags) ? metaOrProgress.tags.join(',') : metaOrProgress.tags;
+            formData.append('tags', tagsStr);
+          }
+        }
+      }
+
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE}/upload`, true);
 
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onProgress) {
+        if (e.lengthComputable && progressCallback) {
           const percent = Math.round((e.loaded / e.total) * 100);
-          onProgress(percent, e.loaded, e.total);
+          progressCallback(percent, e.loaded, e.total);
         }
       };
 
@@ -67,7 +86,7 @@ const api = {
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve(data.data);
           } else {
-            reject(new Error(data.error?.message || `Lỗi tải lên (${xhr.status})`));
+            reject(new Error(data.error?.message || data.message || `Lỗi tải lên (${xhr.status})`));
           }
         } catch (e) {
           reject(new Error(`Phản hồi không hợp lệ (${xhr.status})`));
