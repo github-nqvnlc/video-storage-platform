@@ -1,0 +1,38 @@
+# Dockerfile.worker - Multi-stage build with FFmpeg for Transcoder Worker
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+RUN apk add --no-cache openssl libc6-compat
+
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
+COPY prisma ./prisma/
+
+RUN npm ci
+
+COPY src ./src
+
+RUN npx prisma generate
+RUN npm run build
+
+# --- Production Stage with FFmpeg ---
+FROM node:20-alpine AS runner
+
+# Install FFmpeg, FFprobe, OpenSSL and libc6-compat
+RUN apk add --no-cache ffmpeg openssl libc6-compat
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+RUN npm ci --only=production
+RUN npx prisma generate
+
+COPY --from=builder /app/dist ./dist
+
+CMD ["node", "dist/worker/worker.main.js"]

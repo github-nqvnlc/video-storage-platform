@@ -1,0 +1,173 @@
+networks:
+  windy-network:
+    driver: bridge
+
+services:
+  # 1. PostgreSQL Database Container (Local Persistent)
+  postgres:
+    image: postgres:16-alpine
+    container_name: windy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-windy_video_db}
+      POSTGRES_USER: ${POSTGRES_USER:-windy_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-windy_secure_password_2026}
+    ports:
+      - "5433:5432" # Map ra 5433 để tránh trùng Postgres 5432 trên host nếu có
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - windy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-windy_user} -d ${POSTGRES_DB:-windy_video_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Message Queue Container
+  redis:
+    image: redis:7-alpine
+    container_name: windy-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password_2026}
+    ports:
+      - "6380:6379" # Map ra 6380 để tránh trùng Redis 6379 trên host
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - windy-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. MinIO Object Storage (Dedicated Local Disks)
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    container_name: windy-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minio_secure_password_2026}
+    ports:
+      - "9100:9000" # S3 API (mapped to 9100)
+      - "9101:9001" # Web Console UI (mapped to 9101)
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - windy-network
+
+  # 4. Meilisearch Engine
+  meilisearch:
+    image: getmeili/meilisearch:v1.8
+    container_name: windy-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-meili_master_key_123456}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "7701:7700" # Map ra 7701
+    volumes:
+      - ./data/meilisearch:/meili_data
+    networks:
+      - windy-network
+
+  # 5. NestJS API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: windy-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-windy_user}:${POSTGRES_PASSWORD:-windy_secure_password_2026}@postgres:5432/${POSTGRES_DB:-windy_video_db}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_password_2026}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-https://video-storage.locnv.id.vn/storage}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio_secure_password_2026}
+      MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-raw-videos}
+      MINIO_HLS_BUCKET: ${MINIO_HLS_BUCKET:-hls-videos}
+      MEILISEARCH_HOST: http://meilisearch:7700
+      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-meili_master_key_123456}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - windy-network
+
+  # 6. Transcoding Worker Container (with FFmpeg)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: windy-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-windy_user}:${POSTGRES_PASSWORD:-windy_secure_password_2026}@postgres:5432/${POSTGRES_DB:-windy_video_db}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_password_2026}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-https://video-storage.locnv.id.vn/storage}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio_secure_password_2026}
+      MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-raw-videos}
+      MINIO_HLS_BUCKET: ${MINIO_HLS_BUCKET:-hls-videos}
+      MEILISEARCH_HOST: http://meilisearch:7700
+      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY:-meili_master_key_123456}
+      TRANSCODE_CONCURRENCY: 2
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4096M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - windy-network
+
+  # 7. Nginx Reverse Proxy, Frontend Delivery & HLS Stream Caching
+  nginx:
+    image: nginx:alpine
+    container_name: windy-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/nginx_cache:/var/cache/nginx
+    depends_on:
+      - api
+      - minio
+    networks:
+      - windy-network
+
+  # 8. Cloudflare Tunnel Container
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: windy-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - windy-network

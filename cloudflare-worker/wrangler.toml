@@ -1,0 +1,7 @@
+name = "windy-video-worker"
+main = "src/index.js"
+compatibility_date = "2024-05-01"
+
+[vars]
+# Thay đổi địa chỉ IP hoặc domain máy chủ gốc của bạn
+ORIGIN_HOST = "http://localhost"

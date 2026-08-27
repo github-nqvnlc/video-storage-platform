@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Windy Storage - Nền Tảng Lưu Trữ & Phân Phối Video HLS</title>
+  <meta name="description"
+    content="Hệ thống lưu trữ, phân phối và quản lý video chuẩn HLS Adaptive Bitrate với MinIO, NestJS, FFmpeg và Meilisearch">
+
+  <!-- Google Fonts & Font Awesome -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- HLS.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+
+  <!-- Custom Stylesheet with Cache Busting -->
+  <link rel="stylesheet" href="css/style.css?v=1.0.9">
+</head>
+
+<body>
+
+  <!-- 1. Header & Navigation -->
+  <header class="navbar">
+    <a href="/" class="logo-container">
+      <div class="logo-icon">
+        <i class="fas fa-play"></i>
+      </div>
+      <div>
+        <span class="logo-text">WINDY STORAGE</span>
+        <span class="logo-badge">HLS 4K</span>
+      </div>
+    </a>
+
+    <!-- Realtime Search Bar -->
+    <div class="search-container">
+      <i class="fas fa-search search-icon"></i>
+      <input type="text" id="searchInput" class="search-input"
+        placeholder="Tìm kiếm video theo tiêu đề, mô tả, tags (Meilisearch)..." autocomplete="off">
+    </div>
+
+    <!-- Actions -->
+    <div class="nav-actions">
+      <a href="/api/v1/docs" target="_blank" class="btn btn-secondary" title="Swagger API Docs">
+        <i class="fas fa-code"></i> <span class="btn-text">API Docs</span>
+      </a>
+      <a href="http://localhost:9101" target="_blank" class="btn btn-secondary" title="MinIO Storage Console">
+        <i class="fas fa-database"></i> <span class="btn-text">MinIO</span>
+      </a>
+      <button class="btn btn-primary" id="btnOpenUpload">
+        <i class="fas fa-cloud-upload-alt"></i> <span>Tải Lên Video</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 2. Main Content Container -->
+  <main class="main-container">
+
+    <!-- Hero Stats Bar -->
+    <section class="hero-stats">
+      <div class="stat-card">
+        <div class="stat-info">
+          <h4>Tổng Số Video</h4>
+          <div class="stat-value" id="statTotalVideos">0</div>
+        </div>
+        <div class="stat-icon indigo"><i class="fas fa-video"></i></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-info">
+          <h4>Sẵn Sàng Phát (Ready)</h4>
+          <div class="stat-value" id="statReadyVideos">0</div>
+        </div>
+        <div class="stat-icon emerald"><i class="fas fa-check-double"></i></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-info">
+          <h4>Đang Transcode (HLS)</h4>
+          <div class="stat-value" id="statProcessingVideos">0</div>
+        </div>
+        <div class="stat-icon amber"><i class="fas fa-bolt"></i></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-info">
+          <h4>Tổng Lượt Xem</h4>
+          <div class="stat-value" id="statTotalViews">0</div>
+        </div>
+        <div class="stat-icon cyan"><i class="fas fa-eye"></i></div>
+      </div>
+    </section>
+
+    <!-- Filter Bar & Tag Pills & View Mode Switcher -->
+    <section class="filter-bar">
+      <div class="tag-pills" id="tagPills">
+        <div class="pill active">Tất cả</div>
+      </div>
+
+      <div class="filter-controls">
+        <!-- View Mode Switcher Group -->
+        <div class="view-mode-group">
+          <button class="view-btn active" id="btnViewGrid" title="Chế độ Lưới (Grid View)">
+            <i class="fas fa-th-large"></i>
+          </button>
+          <button class="view-btn" id="btnViewList" title="Chế độ Danh Sách (List View)">
+            <i class="fas fa-list"></i>
+          </button>
+        </div>
+
+        <!-- Grid Columns Selector (Hiện khi ở Grid View) -->
+        <div id="gridOptionsWrapper">
+          <select id="gridColsSelector" class="filter-select" title="Số cột hiển thị">
+            <option value="3">3 Cột</option>
+            <option value="4" selected>4 Cột</option>
+            <option value="5">5 Cột</option>
+            <option value="6">6 Cột</option>
+          </select>
+        </div>
+
+        <!-- List Size Selector (Hiện khi ở List View) -->
+        <div id="listOptionsWrapper" style="display: none;">
+          <select id="listSizeSelector" class="filter-select" title="Kích cỡ hiển thị danh sách">
+            <option value="small">List Nhỏ (Gọn, 1 dòng)</option>
+            <option value="medium" selected>List Vừa (Thumb nhỏ, 2 dòng)</option>
+            <option value="large">List To (Đầy đủ, 3 dòng)</option>
+          </select>
+        </div>
+
+        <!-- Sort Selector -->
+        <div>
+          <select id="sortSelector" class="filter-select">
+            <option value="createdAt:desc">Mới nhất trước</option>
+            <option value="viewCount:desc">Nhiều lượt xem nhất</option>
+            <option value="durationSeconds:desc">Thời lượng dài nhất</option>
+            <option value="durationSeconds:asc">Thời lượng ngắn nhất</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video Grid Feed -->
+    <section class="video-grid" id="videoGrid">
+      <!-- Dynamic Video Cards will be rendered here -->
+    </section>
+
+    <!-- Empty State -->
+    <div id="emptyState" style="display: none; text-align: center; padding: 60px 20px;">
+      <div style="font-size: 56px; color: var(--text-dim); margin-bottom: 16px;">
+        <i class="fas fa-film"></i>
+      </div>
+      <h3 style="font-size: 20px; color: #fff; margin-bottom: 8px;">Chưa có video nào</h3>
+      <p style="color: var(--text-muted); margin-bottom: 20px;">Hãy tải lên video đầu tiên của bạn để hệ thống tự động
+        xử lý stream HLS!</p>
+      <button class="btn btn-primary" onclick="document.getElementById('btnOpenUpload').click()">
+        <i class="fas fa-cloud-upload-alt"></i> Tải Lên Video Ngay
+      </button>
+    </div>
+
+  </main>
+
+  <!-- ==========================================================================
+       MODAL 1: Upload Video (Direct to MinIO)
+       ========================================================================== -->
+  <div class="modal-backdrop" id="uploadModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fas fa-cloud-upload-alt"></i> Tải Lên Video Mới</h3>
+        <button class="modal-close-btn" id="closeUploadModal">&times;</button>
+      </div>
+      <form id="uploadForm">
+        <div class="modal-body">
+          <!-- Dropzone -->
+          <div class="upload-dropzone" id="uploadDropzone">
+            <input type="file" id="videoFileInput" accept="video/mp4,video/mkv,video/mov,video/webm"
+              style="display: none;">
+            <div class="upload-dropzone-icon"><i class="fas fa-file-video"></i></div>
+            <div class="upload-dropzone-text">Kéo thả file video vào đây hoặc bấm để chọn</div>
+            <div class="upload-dropzone-hint">Hỗ trợ định dạng MP4, MKV, MOV, WEBM (Tối đa 5GB)</div>
+            <div id="selectedFileName" style="margin-top: 10px; font-weight: 700; color: #818cf8;"></div>
+          </div>
+
+          <!-- Metadata Fields -->
+          <div class="form-group">
+            <label class="form-label">Tiêu Đề Video *</label>
+            <input type="text" id="uploadTitle" class="form-control" placeholder="Nhập tiêu đề video..." required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mô Tả</label>
+            <textarea id="uploadDesc" class="form-control" placeholder="Mô tả chi tiết nội dung video..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tags (Phân cách bằng dấu phẩy)</label>
+            <input type="text" id="uploadTags" class="form-control" placeholder="dulich, 4k, dalat, khampha">
+          </div>
+
+          <!-- Upload Progress -->
+          <div class="upload-progress-container" id="uploadProgressContainer">
+            <div class="upload-progress-header">
+              <span id="uploadProgressText">Đang tải lên MinIO...</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="uploadProgressFill"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelUploadBtn">Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitUpload">
+            <i class="fas fa-upload"></i> Tải Lên Video
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL 2: HLS Video Player
+       ========================================================================== -->
+  <div class="modal-backdrop" id="playerModal">
+    <div class="modal-card large">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h3 class="modal-title" id="playerTitle">Phát Video HLS</h3>
+          <select id="qualitySelector" class="filter-select" style="padding: 4px 10px; font-size: 12px;"></select>
+        </div>
+        <button class="modal-close-btn" id="closePlayerModal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <div class="player-container">
+          <video id="hlsPlayer" controls playsinline></video>
+        </div>
+        <div class="player-meta">
+          <div class="player-submeta">
+            <span id="playerViews"><i class="fas fa-eye"></i> 0 views</span>
+            <span id="playerDate"><i class="far fa-calendar-alt"></i> 2026-08-27</span>
+            <span class="player-quality-badge"><i class="fas fa-stream"></i> HLS Adaptive Bitrate</span>
+          </div>
+          <div class="player-desc" id="playerDesc">Mô tả video</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL 3: Edit Video Metadata
+       ========================================================================== -->
+  <div class="modal-backdrop" id="editModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fas fa-edit"></i> Chỉnh Sửa Thông Tin Video</h3>
+        <button class="modal-close-btn" id="closeEditModal">&times;</button>
+      </div>
+      <form id="editForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Tiêu Đề Video *</label>
+            <input type="text" id="editTitle" class="form-control" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mô Tả</label>
+            <textarea id="editDesc" class="form-control"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tags (Phân cách bằng dấu phẩy)</label>
+            <input type="text" id="editTags" class="form-control">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Chế Độ Hiển Thị</label>
+            <select id="editVisibility" class="form-control">
+              <option value="PUBLIC">Công khai (Public)</option>
+              <option value="UNLISTED">Không công khai (Unlisted)</option>
+              <option value="PRIVATE">Riêng tư (Private)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelEditBtn">Hủy</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save"></i> Lưu Thay Đổi
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL 5: Share, Preview URL & Web Embed Generator
+       ========================================================================== -->
+  <div class="modal-backdrop" id="shareModal">
+    <div class="modal-card large" style="max-width: 800px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <i class="fas fa-code" style="color: var(--primary);"></i> <span>Chia Sẻ & Xuất Mã Nhúng Video</span>
+        </h3>
+        <button class="modal-close-btn" id="closeShareModal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px;">
+
+        <!-- Video Info Header -->
+        <div
+          style="display: flex; align-items: center; gap: 14px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+          <div id="shareVideoThumb"
+            style="width: 80px; height: 45px; background: #0f172a; border-radius: 6px; overflow: hidden; position: relative; flex-shrink: 0;">
+          </div>
+          <div>
+            <h4 id="shareVideoTitle" style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px;">Tiêu đề
+              video</h4>
+            <span id="shareVideoDuration" style="font-size: 12px; color: var(--text-dim);">Thời lượng: 00:00</span>
+          </div>
+        </div>
+
+        <!-- Tùy Chọn Phát & Nhúng (Options Grid) -->
+        <h4
+          style="font-size: 13px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; letter-spacing: 0.5px;">
+          <i class="fas fa-sliders-h"></i> Tùy Chọn Trình Phát
+        </h4>
+        <div class="embed-options-grid">
+          <label class="toggle-control">
+            <input type="checkbox" id="optAutoplay" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Tự động phát (Autoplay)</span>
+          </label>
+
+          <label class="toggle-control">
+            <input type="checkbox" id="optMuted" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Tắt tiếng mặc định (Muted)</span>
+          </label>
+
+          <label class="toggle-control">
+            <input type="checkbox" id="optControls" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Hiện thanh điều khiển (Controls)</span>
+          </label>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="form-label" style="margin: 0; white-space: nowrap; font-size: 13px;">Chế độ lặp:</label>
+            <select id="optLoopMode" class="filter-select" style="padding: 6px 10px; font-size: 13px;">
+              <option value="none">Không lặp</option>
+              <option value="infinite" selected>Lặp vô hạn (Loop Infinite)</option>
+              <option value="custom">Lặp theo số lần</option>
+            </select>
+            <input type="number" id="optLoopCount" min="1" max="100" value="3" class="form-control"
+              style="width: 70px; padding: 6px 10px; display: none;" title="Số lần lặp">
+          </div>
+        </div>
+
+        <!-- Các Dạng Mã Xuất Bản -->
+        <div class="code-export-section" style="margin-top: 24px;">
+
+          <!-- 1. URL Xem Trước Trực Tiếp -->
+          <div class="code-box-group">
+            <div class="code-box-header">
+              <span><i class="fas fa-link"></i> 1. Link Xem Trước / Chia Sẻ Trực Tiếp (Share URL)</span>
+              <a href="#" id="btnOpenDirectLink" target="_blank" class="preview-link-btn" title="Mở trang xem thử">
+                <i class="fas fa-external-link-alt"></i> Mở thử
+              </a>
+            </div>
+            <div class="code-input-wrapper">
+              <input type="text" id="shareDirectUrl" class="code-input" readonly>
+              <button class="btn-copy" onclick="copyCodeFrom('shareDirectUrl', this)"><i class="far fa-copy"></i> Sao
+                Chép</button>
+            </div>
+          </div>
+
+          <!-- 2. Mã Nhúng Iframe (Cho WordPress / Blog / Landing Page) -->
+          <div class="code-box-group">
+            <div class="code-box-header">
+              <span><i class="fas fa-window-maximize"></i> 2. Mã Nhúng Iframe (Responsive HTML Iframe)</span>
+            </div>
+            <div class="code-input-wrapper">
+              <textarea id="shareIframeCode" class="code-textarea" rows="2" readonly></textarea>
+              <button class="btn-copy" onclick="copyCodeFrom('shareIframeCode', this)"><i class="far fa-copy"></i> Sao
+                Chép</button>
+            </div>
+          </div>
+
+          <!-- 3. Luồng Stream HLS Gốc (.m3u8) -->
+          <div class="code-box-group">
+            <div class="code-box-header">
+              <span><i class="fas fa-stream"></i> 3. Đường Dẫn Luồng HLS Master (.m3u8)</span>
+            </div>
+            <div class="code-input-wrapper">
+              <input type="text" id="shareHlsUrl" class="code-input" readonly>
+              <button class="btn-copy" onclick="copyCodeFrom('shareHlsUrl', this)"><i class="far fa-copy"></i> Sao
+                Chép</button>
+            </div>
+          </div>
+
+          <!-- 4. Mã Nhúng HTML5 + HLS.js Player Snippet -->
+          <div class="code-box-group">
+            <div class="code-box-header">
+              <span><i class="fab fa-html5"></i> 4. Mã Nhúng Tùy Biến (HTML5 + HLS.js Snippet)</span>
+            </div>
+            <div class="code-input-wrapper">
+              <textarea id="shareHtmlSnippet" class="code-textarea" rows="3" readonly></textarea>
+              <button class="btn-copy" onclick="copyCodeFrom('shareHtmlSnippet', this)"><i class="far fa-copy"></i> Sao
+                Chép</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL 4: Custom Confirm Delete / Action Modal
+       ========================================================================== -->
+  <div class="modal-backdrop" id="confirmModal">
+    <div class="modal-card" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="confirmModalTitle"
+          style="color: #f87171; display: flex; align-items: center; gap: 8px;">
+          <i class="fas fa-exclamation-triangle"></i> <span>Xác Nhận Xóa</span>
+        </h3>
+        <button class="modal-close-btn" id="closeConfirmModal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <p id="confirmModalMessage" style="font-size: 14px; line-height: 1.6; color: #cbd5e1; margin: 0;">
+          Bạn có chắc chắn muốn xóa video này? Toàn bộ file gốc và phân đoạn HLS trên MinIO sẽ bị dọn sạch vĩnh viễn!
+        </p>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn btn-secondary" id="btnCancelConfirm">Hủy</button>
+        <button type="button" class="btn" id="btnAcceptConfirm"
+          style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: #fff; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4); border: none;">
+          <i class="fas fa-trash-alt"></i> <span>Xóa Vĩnh Viễn</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts with Unique Timestamp Cache Busting -->
+  <script src="js/api.js?t=1787826190"></script>
+  <script src="js/player.js?t=1787826190"></script>
+  <script src="js/app.js?t=1787826190"></script>
+</body>
+
+</html>

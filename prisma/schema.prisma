@@ -1,0 +1,94 @@
+// prisma/schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+enum VideoStatus {
+  DRAFT
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum Visibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  videos    Video[]
+
+  @@map("users")
+}
+
+model Video {
+  id               String      @id @default(uuid())
+  uploaderId       String?     @map("uploader_id")
+  title            String
+  slug             String      @unique
+  description      String?     @db.Text
+  originalFilename String      @map("original_filename")
+  
+  // Storage Keys trên MinIO
+  rawStorageKey    String      @map("raw_storage_key")
+  hlsMasterKey     String?     @map("hls_master_key")
+  thumbnailKey     String?     @map("thumbnail_key")
+  previewSpriteKey String?     @map("preview_sprite_key")
+  
+  // Video Metadata
+  durationSeconds  Int         @default(0) @map("duration_seconds")
+  width            Int         @default(0)
+  height           Int         @default(0)
+  fileSizeBytes    BigInt      @default(0) @map("file_size_bytes")
+  
+  status           VideoStatus @default(DRAFT)
+  visibility       Visibility  @default(PUBLIC)
+  failureReason    String?     @map("failure_reason") @db.Text
+  viewCount        BigInt      @default(0) @map("view_count")
+  
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  uploader         User?       @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+  tags             VideoTag[]
+
+  @@index([uploaderId])
+  @@index([status, visibility])
+  @@index([createdAt(sort: Desc)])
+  @@map("videos")
+}
+
+model Tag {
+  id     Int        @id @default(autoincrement())
+  name   String     @unique
+  slug   String     @unique
+  videos VideoTag[]
+
+  @@map("tags")
+}
+
+model VideoTag {
+  videoId String @map("video_id")
+  tagId   Int    @map("tag_id")
+
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, tagId])
+  @@map("video_tags")
+}
