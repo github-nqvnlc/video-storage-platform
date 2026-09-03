@@ -13,12 +13,13 @@ import {
   UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { VideosService } from './videos.service';
 import { CreateUploadIntentDto } from './dto/create-upload-intent.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { UpdateVideoDto } from './dto/update-video.dto';
 import { SearchVideoDto } from './dto/search-video.dto';
+import { UploadDirectDto } from './dto/upload-direct.dto';
 
 @ApiTags('Videos')
 @Controller('videos')
@@ -29,16 +30,45 @@ export class VideosController {
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: '[C] Upload video trực tiếp qua API Server lên MinIO' })
+  @ApiBody({
+    description: 'File video và metadata cần upload',
+    schema: {
+      type: 'object',
+      required: ['file', 'title'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Chọn file video từ máy tính (MP4, MKV, MOV, AVI...)',
+        },
+        title: {
+          type: 'string',
+          description: 'Tiêu đề video',
+          example: 'Video giới thiệu sản phẩm',
+        },
+        description: {
+          type: 'string',
+          description: 'Mô tả video',
+          example: 'Video chuẩn HLS adaptive bitrate',
+        },
+        tags: {
+          type: 'string',
+          description: 'Danh sách tags (cách nhau bằng dấu phẩy)',
+          example: 'demo,hls,4k',
+        },
+      },
+    },
+  })
   async uploadDirect(
     @UploadedFile() file: any,
-    @Body() body: { title: string; description?: string; tags?: string },
+    @Body() dto: UploadDirectDto,
   ) {
-    const tags = body.tags
-      ? (Array.isArray(body.tags) ? body.tags : body.tags.split(',').map((t) => t.trim()).filter(Boolean))
+    const tags = dto.tags
+      ? (Array.isArray(dto.tags) ? dto.tags : dto.tags.split(',').map((t) => t.trim()).filter(Boolean))
       : [];
     return await this.videosService.uploadDirect(file, {
-      title: body.title,
-      description: body.description,
+      title: dto.title,
+      description: dto.description,
       tags,
     });
   }
