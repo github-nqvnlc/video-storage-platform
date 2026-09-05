@@ -13,6 +13,12 @@ import { CreateUploadIntentDto } from './dto/create-upload-intent.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { UpdateVideoDto } from './dto/update-video.dto';
 import { SearchVideoDto } from './dto/search-video.dto';
+import {
+  InitiateMultipartUploadDto,
+  GetPartPresignedUrlDto,
+  CompleteMultipartUploadDto,
+  AbortMultipartUploadDto,
+} from './dto/multipart-upload.dto';
 import { VideoStatus, Visibility } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import slugify from 'slugify';
@@ -73,6 +79,143 @@ export class VideosService {
       rawStorageKey,
       expiresInSeconds: 1800,
     };
+  }
+
+  /**
+   * [C - Multipart Initiate] Khởi tạo S3 Multipart Upload cho video dung lượng lớn (2GB+)
+   */
+  async initiateMultipartUpload(dto: InitiateMultipartUploadDto, uploaderId?: string) {
+    const videoId = uuidv4();
+    const ext = path.extname(dto.originalFilename) || '.mp4';
+    const cleanSlug = `${slugify(dto.title, { lower: true, strict: true })}-${videoId.slice(0, 8)}`;
+    const rawStorageKey = `${videoId}/raw_${Date.now()}${ext}`;
+
+    // 1. Khởi tạo S3 Multipart Upload trên MinIO
+    const uploadId = await this.minio.createMultipartUpload(
+      this.minio.rawBucket,
+      rawStorageKey,
+      dto.mimeType || 'video/mp4',
+    );
+
+    // 2. Tạo bản ghi trạng thái DRAFT trong Postgres
+    const video = await this.prisma.video.create({
+      data: {
+        id: videoId,
+        uploaderId: uploaderId || null,
+        title: dto.title,
+        slug: cleanSlug,
+        description: dto.description || null,
+        originalFilename: dto.originalFilename,
+        rawStorageKey,
+        fileSizeBytes: dto.fileSizeBytes ? BigInt(dto.fileSizeBytes) : BigInt(0),
+        status: VideoStatus.DRAFT,
+        visibility: Visibility.PUBLIC,
+      },
+    });
+
+    // 3. Gắn tags nếu có
+    if (dto.tags && dto.tags.length > 0) {
+      await this.upsertTags(video.id, dto.tags);
+    }
+
+    this.logger.log(`Initiated Multipart Upload: videoId=${videoId}, uploadId=${uploadId}, key=${rawStorageKey}`);
+
+    return {
+      videoId: video.id,
+      uploadId,
+      rawStorageKey,
+    };
+  }
+
+  /**
+   * [C - Multipart Part URL] Cấp Presigned PUT URL cho 1 Part
+   */
+  async getMultipartPartUrl(id: string, dto: GetPartPresignedUrlDto) {
+    const video = await this.prisma.video.findUnique({ where: { id } });
+    if (!video) {
+      throw new NotFoundException(`Video với ID ${id} không tồn tại`);
+    }
+
+    const presignedUrl = await this.minio.getPresignedPartUploadUrl(
+      this.minio.rawBucket,
+      video.rawStorageKey,
+      dto.uploadId,
+      dto.partNumber,
+      1800, // 30 phút
+    );
+
+    return {
+      partNumber: dto.partNumber,
+      presignedUrl,
+    };
+  }
+
+  /**
+   * [C - Multipart Complete] Hoàn tất ghép Multipart Upload & kích hoạt Transcode Queue
+   */
+  async completeMultipartUpload(id: string, dto: CompleteMultipartUploadDto) {
+    const video = await this.prisma.video.findUnique({ where: { id } });
+    if (!video) {
+      throw new NotFoundException(`Video với ID ${id} không tồn tại`);
+    }
+
+    if (video.status !== VideoStatus.DRAFT && video.status !== VideoStatus.FAILED) {
+      throw new BadRequestException(`Video đã ở trạng thái ${video.status}`);
+    }
+
+    // 1. Gọi MinIO hoàn tất ghép file
+    this.logger.log(`Completing S3 Multipart Upload for video: ${id} with ${dto.parts.length} parts...`);
+    await this.minio.completeMultipartUpload(
+      this.minio.rawBucket,
+      video.rawStorageKey,
+      dto.uploadId,
+      dto.parts,
+    );
+
+    // 2. Cập nhật trạng thái sang PROCESSING
+    const updated = await this.prisma.video.update({
+      where: { id },
+      data: {
+        status: VideoStatus.PROCESSING,
+        fileSizeBytes: dto.fileSizeBytes ? BigInt(dto.fileSizeBytes) : video.fileSizeBytes,
+      },
+    });
+
+    // 3. Đẩy job vào BullMQ để Transcode Worker thực thi
+    await this.queueService.addTranscodeJob({
+      videoId: video.id,
+      rawStorageKey: video.rawStorageKey,
+    });
+
+    this.logger.log(`Multipart upload completed & transcode job queued for video: ${id}`);
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      message: 'Upload hoàn tất thành công. Video đang được đưa vào hàng đợi xử lý HLS.',
+    };
+  }
+
+  /**
+   * [C - Multipart Abort] Hủy bỏ Multipart Upload dở dang và dọn dẹp
+   */
+  async abortMultipartUpload(id: string, dto: AbortMultipartUploadDto) {
+    const video = await this.prisma.video.findUnique({ where: { id } });
+    if (!video) {
+      return { success: true, message: 'Video không tồn tại' };
+    }
+
+    await this.minio.abortMultipartUpload(
+      this.minio.rawBucket,
+      video.rawStorageKey,
+      dto.uploadId,
+    );
+
+    if (video.status === VideoStatus.DRAFT) {
+      await this.prisma.video.delete({ where: { id } }).catch(() => {});
+    }
+
+    return { success: true, message: 'Đã hủy upload và dọn dẹp tài nguyên' };
   }
 
   /**

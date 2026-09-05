@@ -12,6 +12,10 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
   DeleteObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs-extra';
@@ -113,22 +117,9 @@ export class MinioService implements OnModuleInit {
   }
 
   /**
-   * Tạo Presigned PUT URL để Client upload trực tiếp
+   * Format URL từ S3Client (internal host) sang Public URL truy cập được từ bên ngoài
    */
-  async getPresignedUploadUrl(
-    bucket: string,
-    key: string,
-    contentType: string,
-    expiresIn = 1800,
-  ): Promise<string> {
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ContentType: contentType,
-    });
-    const rawUrl = await getSignedUrl(this.s3Client, command, { expiresIn });
-
-    // Thay thế internal hostname (http://minio:9000) bằng Public URL (https://video-storage.locnv.id.vn/storage)
+  public formatPublicUrl(rawUrl: string): string {
     try {
       const parsed = new URL(rawUrl);
       const publicBase = new URL(this.publicUrl);
@@ -145,6 +136,104 @@ export class MinioService implements OnModuleInit {
       return parsed.toString();
     } catch (e) {
       return rawUrl;
+    }
+  }
+
+  /**
+   * Tạo Presigned PUT URL để Client upload trực tiếp
+   */
+  async getPresignedUploadUrl(
+    bucket: string,
+    key: string,
+    contentType: string,
+    expiresIn = 1800,
+  ): Promise<string> {
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    });
+    const rawUrl = await getSignedUrl(this.s3Client, command, { expiresIn });
+    return this.formatPublicUrl(rawUrl);
+  }
+
+  /**
+   * Khởi tạo S3 Multipart Upload
+   */
+  async createMultipartUpload(
+    bucket: string,
+    key: string,
+    contentType: string,
+  ): Promise<string> {
+    const command = new CreateMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    });
+    const response = await this.s3Client.send(command);
+    return response.UploadId;
+  }
+
+  /**
+   * Cấp Presigned URL cho từng Part trong Multipart Upload
+   */
+  async getPresignedPartUploadUrl(
+    bucket: string,
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    expiresIn = 1800,
+  ): Promise<string> {
+    const command = new UploadPartCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+    const rawUrl = await getSignedUrl(this.s3Client, command, { expiresIn });
+    return this.formatPublicUrl(rawUrl);
+  }
+
+  /**
+   * Hoàn tất ghép Multipart Upload từ các parts
+   */
+  async completeMultipartUpload(
+    bucket: string,
+    key: string,
+    uploadId: string,
+    parts: { PartNumber: number; ETag: string }[],
+  ): Promise<any> {
+    // Sắp xếp các parts theo thứ tự partNumber tăng dần
+    const sortedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber);
+    const command = new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: sortedParts,
+      },
+    });
+    return await this.s3Client.send(command);
+  }
+
+  /**
+   * Hủy bỏ Multipart Upload và dọn các chunks dở dang
+   */
+  async abortMultipartUpload(
+    bucket: string,
+    key: string,
+    uploadId: string,
+  ): Promise<void> {
+    try {
+      const command = new AbortMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        UploadId: uploadId,
+      });
+      await this.s3Client.send(command);
+      this.logger.log(`Aborted multipart upload: [${bucket}] ${key} (UploadId: ${uploadId})`);
+    } catch (error) {
+      this.logger.warn(`Failed to abort multipart upload: ${error.message}`);
     }
   }
 

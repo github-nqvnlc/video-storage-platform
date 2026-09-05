@@ -99,6 +99,209 @@ const api = {
   },
 
   /**
+   * Chuẩn hóa URL sang Origin hiện tại nếu cùng server
+   */
+  normalizeUploadUrl(url) {
+    if (!url) return url;
+    try {
+      const parsed = new URL(url);
+      const currentOrigin = new URL(window.location.origin);
+      if (parsed.hostname !== currentOrigin.hostname) {
+        parsed.protocol = currentOrigin.protocol;
+        parsed.host = currentOrigin.host;
+        parsed.port = currentOrigin.port;
+        return parsed.toString();
+      }
+    } catch (e) {
+      console.warn('URL parse fallback:', e);
+    }
+    return url;
+  },
+
+  /**
+   * Khởi tạo S3 Multipart Upload
+   */
+  async initiateMultipartUpload(payload) {
+    const res = await fetch(`${API_BASE}/multipart/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.message || 'Lỗi khởi tạo Multipart Upload');
+    return data.data;
+  },
+
+  /**
+   * Lấy Presigned URL cho 1 Part
+   */
+  async getMultipartPartUrl(videoId, payload) {
+    const res = await fetch(`${API_BASE}/multipart/${videoId}/part-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.message || 'Lỗi lấy Presigned URL cho part');
+    return data.data;
+  },
+
+  /**
+   * Hoàn tất ghép S3 Multipart Upload
+   */
+  async completeMultipartUpload(videoId, payload) {
+    const res = await fetch(`${API_BASE}/multipart/${videoId}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.message || 'Lỗi hoàn tất ghép video');
+    return data.data;
+  },
+
+  /**
+   * Hủy S3 Multipart Upload
+   */
+  async abortMultipartUpload(videoId, payload) {
+    try {
+      await fetch(`${API_BASE}/multipart/${videoId}/abort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      console.warn('Abort upload error:', e);
+    }
+  },
+
+  /**
+   * Upload video dung lượng lớn (2GB+) theo cơ chế S3 Multipart / Chunks
+   * (Mỗi chunk 15MB, vượt qua giới hạn 100MB Cloudflare & không tràn RAM)
+   */
+  async uploadLargeVideoMultipart(file, meta, onProgress) {
+    if (!file) throw new Error('Không tìm thấy file để upload');
+
+    const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB mỗi chunk
+    const totalParts = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+    
+    // 1. Khởi tạo Multipart Upload
+    const initData = await this.initiateMultipartUpload({
+      title: meta.title,
+      description: meta.description || '',
+      tags: meta.tags || [],
+      originalFilename: file.name,
+      mimeType: file.type || 'video/mp4',
+      fileSizeBytes: file.size,
+    });
+
+    const videoId = initData.videoId;
+    const uploadId = initData.uploadId;
+    const uploadedParts = [];
+
+    try {
+      for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+        const start = (partNumber - 1) * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        // Lấy Presigned URL cho part này
+        const partUrlData = await this.getMultipartPartUrl(videoId, {
+          uploadId,
+          partNumber,
+        });
+
+        const targetUrl = this.normalizeUploadUrl(partUrlData.presignedUrl);
+
+        // Upload chunk qua XHR để bắt ETag và theo dõi tiến trình
+        const etag = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', targetUrl, true);
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+              const currentChunkLoaded = e.loaded;
+              const totalLoadedSoFar = start + currentChunkLoaded;
+              const overallPercent = Math.min(99, Math.round((totalLoadedSoFar / file.size) * 100));
+              onProgress({
+                percent: overallPercent,
+                partNumber,
+                totalParts,
+                loaded: totalLoadedSoFar,
+                total: file.size,
+              });
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              let rawETag = xhr.getResponseHeader('ETag') || xhr.getResponseHeader('etag');
+              if (!rawETag) {
+                // Một số proxy có thể không trả ETag header, fallback lấy từ response
+                rawETag = `"${partNumber}"`;
+              }
+              resolve(rawETag.replace(/^W\//, '')); // Loại bỏ Weak ETag nếu có
+            } else {
+              reject(new Error(`Tải lên mảnh ${partNumber}/${totalParts} thất bại (HTTP ${xhr.status})`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error(`Lỗi kết nối mạng khi tải lên mảnh ${partNumber}/${totalParts}`));
+          xhr.send(chunk);
+        });
+
+        uploadedParts.push({
+          PartNumber: partNumber,
+          ETag: etag,
+        });
+
+        if (onProgress) {
+          const totalLoadedSoFar = end;
+          const overallPercent = Math.min(99, Math.round((totalLoadedSoFar / file.size) * 100));
+          onProgress({
+            percent: overallPercent,
+            partNumber,
+            totalParts,
+            loaded: totalLoadedSoFar,
+            total: file.size,
+          });
+        }
+      }
+
+      // 3. Hoàn tất ghép file Multipart trên MinIO
+      if (onProgress) {
+        onProgress({
+          percent: 99,
+          partNumber: totalParts,
+          totalParts,
+          isCompleting: true,
+        });
+      }
+
+      const completeRes = await this.completeMultipartUpload(videoId, {
+        uploadId,
+        parts: uploadedParts,
+        fileSizeBytes: file.size,
+      });
+
+      if (onProgress) {
+        onProgress({
+          percent: 100,
+          partNumber: totalParts,
+          totalParts,
+          isFinished: true,
+        });
+      }
+
+      return completeRes;
+    } catch (err) {
+      // Hủy multipart upload dở dang để giải phóng dung lượng MinIO
+      await this.abortMultipartUpload(videoId, { uploadId });
+      throw err;
+    }
+  },
+
+  /**
    * Khởi tạo upload intent & nhận MinIO Presigned URL
    */
   async createUploadIntent(payload) {
@@ -117,21 +320,7 @@ const api = {
    */
   uploadToMinio(uploadUrl, file, onProgress) {
     return new Promise((resolve, reject) => {
-      let targetUrl = uploadUrl;
-      try {
-        const parsed = new URL(uploadUrl);
-        const currentOrigin = new URL(window.location.origin);
-        
-        if (parsed.hostname !== currentOrigin.hostname) {
-          parsed.protocol = currentOrigin.protocol;
-          parsed.host = currentOrigin.host;
-          parsed.port = currentOrigin.port;
-          targetUrl = parsed.toString();
-        }
-      } catch (e) {
-        console.warn('URL parse fallback:', e);
-      }
-
+      const targetUrl = this.normalizeUploadUrl(uploadUrl);
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', targetUrl, true);
       xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');

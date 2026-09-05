@@ -561,7 +561,7 @@ function handleFileSelected(file) {
 }
 
 /**
- * Upload Video trực tiếp lên API Server
+ * Upload Video lên MinIO theo chuẩn S3 Multipart / Chunks (Hỗ trợ file 2GB+ không giới hạn RAM / Cloudflare)
  */
 async function handleUploadSubmit(e) {
   e.preventDefault();
@@ -585,12 +585,22 @@ async function handleUploadSubmit(e) {
   if (submitBtn) submitBtn.disabled = true;
 
   try {
-    await api.uploadVideoDirect(
+    const sizeInMB = (selectedFile.size / (1024 * 1024)).toFixed(1);
+    this.logger?.log?.(`Bắt đầu tải video ${selectedFile.name} (${sizeInMB} MB)...`);
+
+    await api.uploadLargeVideoMultipart(
       selectedFile,
       { title, description, tags },
-      (percent) => {
-        if (progressFill) progressFill.style.width = `${percent}%`;
-        if (progressText) progressText.textContent = `Đang tải lên MinIO: ${percent}%...`;
+      (info) => {
+        if (progressFill) progressFill.style.width = `${info.percent}%`;
+        if (progressText) {
+          if (info.isCompleting) {
+            progressText.textContent = `Đang hoàn tất ghép file trên MinIO (99%)...`;
+          } else {
+            const partInfo = info.totalParts > 1 ? ` (Mảnh ${info.partNumber}/${info.totalParts})` : '';
+            progressText.textContent = `Đang tải lên MinIO${partInfo}: ${info.percent}%...`;
+          }
+        }
       },
     );
 
