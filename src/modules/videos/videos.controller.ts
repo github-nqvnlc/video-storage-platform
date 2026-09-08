@@ -13,7 +13,13 @@ import {
   UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { VideosService } from './videos.service';
 import { CreateUploadIntentDto } from './dto/create-upload-intent.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
@@ -35,7 +41,9 @@ export class VideosController {
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: '[C] Upload video trực tiếp qua API Server lên MinIO' })
+  @ApiOperation({
+    summary: '[C] Upload video trực tiếp qua API Server lên MinIO',
+  })
   @ApiBody({
     description: 'File video và metadata cần upload',
     schema: {
@@ -65,12 +73,14 @@ export class VideosController {
       },
     },
   })
-  async uploadDirect(
-    @UploadedFile() file: any,
-    @Body() dto: UploadDirectDto,
-  ) {
+  async uploadDirect(@UploadedFile() file: any, @Body() dto: UploadDirectDto) {
     const tags = dto.tags
-      ? (Array.isArray(dto.tags) ? dto.tags : dto.tags.split(',').map((t) => t.trim()).filter(Boolean))
+      ? Array.isArray(dto.tags)
+        ? dto.tags
+        : dto.tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
       : [];
     return await this.videosService.uploadDirect(file, {
       title: dto.title,
@@ -80,22 +90,32 @@ export class VideosController {
   }
 
   @Post('upload-intent')
-  @ApiOperation({ summary: '[C] Khởi tạo upload & nhận Presigned URL từ MinIO' })
+  @ApiOperation({
+    summary: '[C] Khởi tạo upload & nhận Presigned URL từ MinIO',
+  })
   @ApiResponse({ status: 201, description: 'Cấp Presigned URL thành công' })
   async createUploadIntent(@Body() dto: CreateUploadIntentDto) {
     return await this.videosService.createUploadIntent(dto);
   }
 
   @Post('multipart/initiate')
-  @ApiOperation({ summary: '[C - Multipart] Khởi tạo S3 Multipart Upload cho video lớn (2GB+)' })
-  @ApiResponse({ status: 201, description: 'Khởi tạo Multipart Upload thành công' })
+  @ApiOperation({
+    summary:
+      '[C - Multipart] Khởi tạo S3 Multipart Upload cho video lớn (2GB+)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Khởi tạo Multipart Upload thành công',
+  })
   async initiateMultipartUpload(@Body() dto: InitiateMultipartUploadDto) {
     return await this.videosService.initiateMultipartUpload(dto);
   }
 
   @Post('multipart/:id/part-url')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '[C - Multipart] Cấp Presigned URL để upload từng Part' })
+  @ApiOperation({
+    summary: '[C - Multipart] Cấp Presigned URL để upload từng Part',
+  })
   async getMultipartPartUrl(
     @Param('id') id: string,
     @Body() dto: GetPartPresignedUrlDto,
@@ -105,7 +125,10 @@ export class VideosController {
 
   @Post('multipart/:id/complete')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '[C - Multipart] Hoàn tất ghép file Multipart & đưa vào hàng đợi HLS' })
+  @ApiOperation({
+    summary:
+      '[C - Multipart] Hoàn tất ghép file Multipart & đưa vào hàng đợi HLS',
+  })
   async completeMultipartUpload(
     @Param('id') id: string,
     @Body() dto: CompleteMultipartUploadDto,
@@ -115,7 +138,9 @@ export class VideosController {
 
   @Post('multipart/:id/abort')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '[C - Multipart] Hủy Multipart Upload dở dang và dọn tài nguyên' })
+  @ApiOperation({
+    summary: '[C - Multipart] Hủy Multipart Upload dở dang và dọn tài nguyên',
+  })
   async abortMultipartUpload(
     @Param('id') id: string,
     @Body() dto: AbortMultipartUploadDto,
@@ -125,7 +150,9 @@ export class VideosController {
 
   @Post(':id/complete-upload')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '[C] Báo hoàn tất upload để kích hoạt hàng đợi transcode HLS' })
+  @ApiOperation({
+    summary: '[C] Báo hoàn tất upload để kích hoạt hàng đợi transcode HLS',
+  })
   async completeUpload(
     @Param('id') id: string,
     @Body() dto: CompleteUploadDto,
@@ -135,7 +162,9 @@ export class VideosController {
 
   @Post(':id/retry')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '[Retry] Thử lại xử lý transcode video bị lỗi hoặc treo' })
+  @ApiOperation({
+    summary: '[Retry] Thử lại xử lý transcode video bị lỗi hoặc treo',
+  })
   async retryTranscode(@Param('id') id: string) {
     return await this.videosService.retryTranscode(id);
   }
@@ -167,16 +196,17 @@ export class VideosController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: '[U] Cập nhật metadata video (tiêu đề, tags, visibility)' })
-  async update(
-    @Param('id') id: string,
-    @Body() dto: UpdateVideoDto,
-  ) {
+  @ApiOperation({
+    summary: '[U] Cập nhật metadata video (tiêu đề, tags, visibility)',
+  })
+  async update(@Param('id') id: string, @Body() dto: UpdateVideoDto) {
     return await this.videosService.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: '[D] Xóa video trong DB và dọn sạch file trên MinIO' })
+  @ApiOperation({
+    summary: '[D] Xóa video trong DB và dọn sạch file trên MinIO',
+  })
   async remove(@Param('id') id: string) {
     return await this.videosService.remove(id);
   }

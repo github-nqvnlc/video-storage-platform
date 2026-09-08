@@ -62,7 +62,9 @@ export class VideosService {
         description: dto.description || null,
         originalFilename: dto.originalFilename,
         rawStorageKey,
-        fileSizeBytes: dto.fileSizeBytes ? BigInt(dto.fileSizeBytes) : BigInt(0),
+        fileSizeBytes: dto.fileSizeBytes
+          ? BigInt(dto.fileSizeBytes)
+          : BigInt(0),
         status: VideoStatus.DRAFT,
         visibility: Visibility.PUBLIC,
       },
@@ -84,7 +86,10 @@ export class VideosService {
   /**
    * [C - Multipart Initiate] Khởi tạo S3 Multipart Upload cho video dung lượng lớn (2GB+)
    */
-  async initiateMultipartUpload(dto: InitiateMultipartUploadDto, uploaderId?: string) {
+  async initiateMultipartUpload(
+    dto: InitiateMultipartUploadDto,
+    uploaderId?: string,
+  ) {
     const videoId = uuidv4();
     const ext = path.extname(dto.originalFilename) || '.mp4';
     const cleanSlug = `${slugify(dto.title, { lower: true, strict: true })}-${videoId.slice(0, 8)}`;
@@ -107,7 +112,9 @@ export class VideosService {
         description: dto.description || null,
         originalFilename: dto.originalFilename,
         rawStorageKey,
-        fileSizeBytes: dto.fileSizeBytes ? BigInt(dto.fileSizeBytes) : BigInt(0),
+        fileSizeBytes: dto.fileSizeBytes
+          ? BigInt(dto.fileSizeBytes)
+          : BigInt(0),
         status: VideoStatus.DRAFT,
         visibility: Visibility.PUBLIC,
       },
@@ -118,7 +125,9 @@ export class VideosService {
       await this.upsertTags(video.id, dto.tags);
     }
 
-    this.logger.log(`Initiated Multipart Upload: videoId=${videoId}, uploadId=${uploadId}, key=${rawStorageKey}`);
+    this.logger.log(
+      `Initiated Multipart Upload: videoId=${videoId}, uploadId=${uploadId}, key=${rawStorageKey}`,
+    );
 
     return {
       videoId: video.id,
@@ -159,12 +168,17 @@ export class VideosService {
       throw new NotFoundException(`Video với ID ${id} không tồn tại`);
     }
 
-    if (video.status !== VideoStatus.DRAFT && video.status !== VideoStatus.FAILED) {
+    if (
+      video.status !== VideoStatus.DRAFT &&
+      video.status !== VideoStatus.FAILED
+    ) {
       throw new BadRequestException(`Video đã ở trạng thái ${video.status}`);
     }
 
     // 1. Gọi MinIO hoàn tất ghép file
-    this.logger.log(`Completing S3 Multipart Upload for video: ${id} with ${dto.parts.length} parts...`);
+    this.logger.log(
+      `Completing S3 Multipart Upload for video: ${id} with ${dto.parts.length} parts...`,
+    );
     await this.minio.completeMultipartUpload(
       this.minio.rawBucket,
       video.rawStorageKey,
@@ -177,7 +191,9 @@ export class VideosService {
       where: { id },
       data: {
         status: VideoStatus.PROCESSING,
-        fileSizeBytes: dto.fileSizeBytes ? BigInt(dto.fileSizeBytes) : video.fileSizeBytes,
+        fileSizeBytes: dto.fileSizeBytes
+          ? BigInt(dto.fileSizeBytes)
+          : video.fileSizeBytes,
       },
     });
 
@@ -187,12 +203,15 @@ export class VideosService {
       rawStorageKey: video.rawStorageKey,
     });
 
-    this.logger.log(`Multipart upload completed & transcode job queued for video: ${id}`);
+    this.logger.log(
+      `Multipart upload completed & transcode job queued for video: ${id}`,
+    );
 
     return {
       id: updated.id,
       status: updated.status,
-      message: 'Upload hoàn tất thành công. Video đang được đưa vào hàng đợi xử lý HLS.',
+      message:
+        'Upload hoàn tất thành công. Video đang được đưa vào hàng đợi xử lý HLS.',
     };
   }
 
@@ -236,7 +255,9 @@ export class VideosService {
     const rawStorageKey = `${videoId}/raw_${Date.now()}${ext}`;
 
     // 1. Upload buffer lên MinIO Bucket raw-videos
-    this.logger.log(`Uploading file directly to MinIO: ${rawStorageKey} (${(file.size / (1024*1024)).toFixed(2)} MB)`);
+    this.logger.log(
+      `Uploading file directly to MinIO: ${rawStorageKey} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+    );
     await this.minio.uploadBuffer(
       this.minio.rawBucket,
       rawStorageKey,
@@ -275,7 +296,8 @@ export class VideosService {
       id: video.id,
       title: video.title,
       status: video.status,
-      message: 'Video tải lên thành công và đang được đưa vào hàng đợi xử lý HLS!',
+      message:
+        'Video tải lên thành công và đang được đưa vào hàng đợi xử lý HLS!',
     };
   }
 
@@ -288,7 +310,10 @@ export class VideosService {
       throw new NotFoundException(`Video với ID ${id} không tồn tại`);
     }
 
-    if (video.status !== VideoStatus.DRAFT && video.status !== VideoStatus.FAILED) {
+    if (
+      video.status !== VideoStatus.DRAFT &&
+      video.status !== VideoStatus.FAILED
+    ) {
       throw new BadRequestException(`Video đã ở trạng thái ${video.status}`);
     }
 
@@ -297,7 +322,9 @@ export class VideosService {
       where: { id },
       data: {
         status: VideoStatus.PROCESSING,
-        fileSizeBytes: dto.actualSizeBytes ? BigInt(dto.actualSizeBytes) : video.fileSizeBytes,
+        fileSizeBytes: dto.actualSizeBytes
+          ? BigInt(dto.actualSizeBytes)
+          : video.fileSizeBytes,
       },
     });
 
@@ -472,7 +499,8 @@ export class VideosService {
     if (dto.title !== undefined) updateData.title = dto.title;
     if (dto.description !== undefined) updateData.description = dto.description;
     if (dto.visibility !== undefined) updateData.visibility = dto.visibility;
-    if (dto.thumbnailKey !== undefined) updateData.thumbnailKey = dto.thumbnailKey;
+    if (dto.thumbnailKey !== undefined)
+      updateData.thumbnailKey = dto.thumbnailKey;
 
     const updated = await this.prisma.video.update({
       where: { id },
@@ -526,7 +554,8 @@ export class VideosService {
 
     return {
       id,
-      message: 'Video đã được xóa thành công và đang được dọn sạch khỏi Object Storage.',
+      message:
+        'Video đã được xóa thành công và đang được dọn sạch khỏi Object Storage.',
     };
   }
 
@@ -576,9 +605,18 @@ export class VideosService {
       viewCount: video.viewCount ? video.viewCount.toString() : '0',
       failureReason: video.failureReason,
       // Public URLs
-      hlsMasterUrl: this.minio.getPublicMediaUrl(this.minio.hlsBucket, video.hlsMasterKey),
-      thumbnailUrl: this.minio.getPublicMediaUrl(this.minio.hlsBucket, video.thumbnailKey),
-      previewSpriteUrl: this.minio.getPublicMediaUrl(this.minio.hlsBucket, video.previewSpriteKey),
+      hlsMasterUrl: this.minio.getPublicMediaUrl(
+        this.minio.hlsBucket,
+        video.hlsMasterKey,
+      ),
+      thumbnailUrl: this.minio.getPublicMediaUrl(
+        this.minio.hlsBucket,
+        video.thumbnailKey,
+      ),
+      previewSpriteUrl: this.minio.getPublicMediaUrl(
+        this.minio.hlsBucket,
+        video.previewSpriteKey,
+      ),
       tags: video.tags ? video.tags.map((t: any) => t.tag.name) : [],
       uploader: video.uploader || null,
       createdAt: video.createdAt,

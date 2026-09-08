@@ -1,14 +1,26 @@
 // src/modules/videos/dto/create-upload-intent.dto.ts
-import { IsString, IsNotEmpty, IsOptional, IsNumber, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateUploadIntentDto {
-  @ApiProperty({ description: 'Tiêu đề video ban đầu', example: 'Khám phá Đà Lạt 4K' })
+  @ApiProperty({
+    description: 'Tiêu đề video ban đầu',
+    example: 'Khám phá Đà Lạt 4K',
+  })
   @IsString()
   @IsNotEmpty()
   title: string;
 
-  @ApiProperty({ description: 'Tên file gốc bao gồm phần mở rộng', example: 'dalat_travel.mp4' })
+  @ApiProperty({
+    description: 'Tên file gốc bao gồm phần mở rộng',
+    example: 'dalat_travel.mp4',
+  })
   @IsString()
   @IsNotEmpty()
   originalFilename: string;
@@ -18,7 +30,10 @@ export class CreateUploadIntentDto {
   @IsNotEmpty()
   mimeType: string;
 
-  @ApiPropertyOptional({ description: 'Kích thước file tính theo bytes', example: 104857600 })
+  @ApiPropertyOptional({
+    description: 'Kích thước file tính theo bytes',
+    example: 104857600,
+  })
   @IsOptional()
   @IsNumber()
   @Min(1)
@@ -29,7 +44,10 @@ export class CreateUploadIntentDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Danh sách tags', example: ['dulich', 'dalat', '4k'] })
+  @ApiPropertyOptional({
+    description: 'Danh sách tags',
+    example: ['dulich', 'dalat', '4k'],
+  })
   @IsOptional()
   tags?: string[];
 }

@@ -22,16 +22,22 @@ export class FFmpegService {
   async probe(inputPath: string): Promise<VideoMetadata> {
     try {
       const { stdout } = await execa('ffprobe', [
-        '-v', 'quiet',
-        '-print_format', 'json',
+        '-v',
+        'quiet',
+        '-print_format',
+        'json',
         '-show_format',
         '-show_streams',
         inputPath,
       ]);
 
       const data = JSON.parse(stdout);
-      const videoStream = data.streams?.find((s: any) => s.codec_type === 'video');
-      const audioStream = data.streams?.find((s: any) => s.codec_type === 'audio');
+      const videoStream = data.streams?.find(
+        (s: any) => s.codec_type === 'video',
+      );
+      const audioStream = data.streams?.find(
+        (s: any) => s.codec_type === 'audio',
+      );
 
       const duration = Math.round(
         parseFloat(data.format?.duration || videoStream?.duration || '0'),
@@ -57,23 +63,67 @@ export class FFmpegService {
   /**
    * Transcode video sang chuẩn HLS Adaptive Bitrate (ABR) (Hỗ trợ cả video có tiếng và không có tiếng)
    */
-  async transcodeToHls(inputPath: string, outputDir: string, meta: VideoMetadata): Promise<string> {
+  async transcodeToHls(
+    inputPath: string,
+    outputDir: string,
+    meta: VideoMetadata,
+  ): Promise<string> {
     await fs.ensureDir(outputDir);
 
     // Xác định các profile độ phân giải phù hợp với video gốc
-    const profiles: Array<{ name: string; width: number; height: number; videoBitrate: string; maxrate: string; bufsize: string; audioBitrate: string }> = [];
+    const profiles: Array<{
+      name: string;
+      width: number;
+      height: number;
+      videoBitrate: string;
+      maxrate: string;
+      bufsize: string;
+      audioBitrate: string;
+    }> = [];
 
     if (meta.height >= 1080) {
-      profiles.push({ name: '1080p', width: 1920, height: 1080, videoBitrate: '4500k', maxrate: '4800k', bufsize: '9000k', audioBitrate: '128k' });
+      profiles.push({
+        name: '1080p',
+        width: 1920,
+        height: 1080,
+        videoBitrate: '4500k',
+        maxrate: '4800k',
+        bufsize: '9000k',
+        audioBitrate: '128k',
+      });
     }
     if (meta.height >= 720) {
-      profiles.push({ name: '720p', width: 1280, height: 720, videoBitrate: '2500k', maxrate: '2700k', bufsize: '5000k', audioBitrate: '128k' });
+      profiles.push({
+        name: '720p',
+        width: 1280,
+        height: 720,
+        videoBitrate: '2500k',
+        maxrate: '2700k',
+        bufsize: '5000k',
+        audioBitrate: '128k',
+      });
     }
     if (meta.height >= 480 || profiles.length === 0) {
-      profiles.push({ name: '480p', width: 854, height: 480, videoBitrate: '1000k', maxrate: '1100k', bufsize: '2000k', audioBitrate: '96k' });
+      profiles.push({
+        name: '480p',
+        width: 854,
+        height: 480,
+        videoBitrate: '1000k',
+        maxrate: '1100k',
+        bufsize: '2000k',
+        audioBitrate: '96k',
+      });
     }
     if (meta.height < 480) {
-      profiles.push({ name: '360p', width: 640, height: 360, videoBitrate: '600k', maxrate: '650k', bufsize: '1200k', audioBitrate: '64k' });
+      profiles.push({
+        name: '360p',
+        width: 640,
+        height: 360,
+        videoBitrate: '600k',
+        maxrate: '650k',
+        bufsize: '1200k',
+        audioBitrate: '64k',
+      });
     }
 
     const filterComplex: string[] = [];
@@ -89,25 +139,39 @@ export class FFmpegService {
     filterComplex.push(`[0:v]split=${splitCount}${splitOutputs}`);
 
     profiles.forEach((p, index) => {
-      filterComplex.push(`[v${index}]scale=w=${p.width}:h=${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2[v${index}out]`);
-      
+      filterComplex.push(
+        `[v${index}]scale=w=${p.width}:h=${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2[v${index}out]`,
+      );
+
       mapArgs.push(
-        '-map', `[v${index}out]`,
-        `-c:v:${index}`, 'libx264',
-        `-b:v:${index}`, p.videoBitrate,
-        `-maxrate:v:${index}`, p.maxrate,
-        `-bufsize:v:${index}`, p.bufsize,
-        `-preset`, 'fast',
-        `-g`, '48',
-        `-sc_threshold`, '0',
+        '-map',
+        `[v${index}out]`,
+        `-c:v:${index}`,
+        'libx264',
+        `-b:v:${index}`,
+        p.videoBitrate,
+        `-maxrate:v:${index}`,
+        p.maxrate,
+        `-bufsize:v:${index}`,
+        p.bufsize,
+        `-preset`,
+        'fast',
+        `-g`,
+        '48',
+        `-sc_threshold`,
+        '0',
       );
 
       if (meta.hasAudio) {
         mapArgs.push(
-          '-map', '0:a:0?',
-          `-c:a:${index}`, 'aac',
-          `-b:a:${index}`, p.audioBitrate,
-          `-ac`, '2',
+          '-map',
+          '0:a:0?',
+          `-c:a:${index}`,
+          'aac',
+          `-b:a:${index}`,
+          p.audioBitrate,
+          `-ac`,
+          '2',
         );
         varStreamMap.push(`v:${index},a:${index},name:${p.name}`);
       } else {
@@ -117,21 +181,33 @@ export class FFmpegService {
 
     const masterPlaylist = 'master.m3u8';
     const ffmpegArgs = [
-      '-i', inputPath,
-      '-filter_complex', filterComplex.join('; '),
+      '-i',
+      inputPath,
+      '-filter_complex',
+      filterComplex.join('; '),
       ...mapArgs,
-      '-f', 'hls',
-      '-hls_time', '4',
-      '-hls_playlist_type', 'vod',
-      '-hls_flags', 'independent_segments',
-      '-hls_segment_type', 'mpegts',
-      '-hls_segment_filename', path.join(outputDir, '%v', 'segment_%03d.ts'),
-      '-master_pl_name', masterPlaylist,
-      '-var_stream_map', varStreamMap.join(' '),
+      '-f',
+      'hls',
+      '-hls_time',
+      '4',
+      '-hls_playlist_type',
+      'vod',
+      '-hls_flags',
+      'independent_segments',
+      '-hls_segment_type',
+      'mpegts',
+      '-hls_segment_filename',
+      path.join(outputDir, '%v', 'segment_%03d.ts'),
+      '-master_pl_name',
+      masterPlaylist,
+      '-var_stream_map',
+      varStreamMap.join(' '),
       path.join(outputDir, '%v', 'playlist.m3u8'),
     ];
 
-    this.logger.log(`Starting FFmpeg HLS transcode (hasAudio: ${meta.hasAudio}) with ${profiles.length} profiles: [${profiles.map(p => p.name).join(', ')}]`);
+    this.logger.log(
+      `Starting FFmpeg HLS transcode (hasAudio: ${meta.hasAudio}) with ${profiles.length} profiles: [${profiles.map((p) => p.name).join(', ')}]`,
+    );
 
     // Tạo sẵn các thư mục con cho từng profile
     for (const p of profiles) {
@@ -139,7 +215,9 @@ export class FFmpegService {
     }
 
     await execa('ffmpeg', ffmpegArgs);
-    this.logger.log(`HLS transcode finished: ${path.join(outputDir, masterPlaylist)}`);
+    this.logger.log(
+      `HLS transcode finished: ${path.join(outputDir, masterPlaylist)}`,
+    );
 
     return masterPlaylist;
   }
@@ -147,15 +225,24 @@ export class FFmpegService {
   /**
    * Tạo Thumbnail chính từ khung hình ở giây thứ 5 (hoặc 20% thời lượng)
    */
-  async generateThumbnail(inputPath: string, outputPath: string, timestampSeconds = 5): Promise<string> {
+  async generateThumbnail(
+    inputPath: string,
+    outputPath: string,
+    timestampSeconds = 5,
+  ): Promise<string> {
     await fs.ensureDir(path.dirname(outputPath));
-    
+
     await execa('ffmpeg', [
-      '-ss', timestampSeconds.toString(),
-      '-i', inputPath,
-      '-vframes', '1',
-      '-q:v', '2',
-      '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease',
+      '-ss',
+      timestampSeconds.toString(),
+      '-i',
+      inputPath,
+      '-vframes',
+      '1',
+      '-q:v',
+      '2',
+      '-vf',
+      'scale=1280:720:force_original_aspect_ratio=decrease',
       '-y',
       outputPath,
     ]);
@@ -166,19 +253,26 @@ export class FFmpegService {
   /**
    * Tạo Sprite Sheet Preview (Storyboard) + WebVTT cho player
    */
-  async generateSpritePreview(inputPath: string, outputDir: string, durationSeconds: number): Promise<{ spritePath: string; vttPath: string } | null> {
+  async generateSpritePreview(
+    inputPath: string,
+    outputDir: string,
+    durationSeconds: number,
+  ): Promise<{ spritePath: string; vttPath: string } | null> {
     try {
       await fs.ensureDir(outputDir);
       const spritePath = path.join(outputDir, 'storyboard.jpg');
       const vttPath = path.join(outputDir, 'storyboard.vtt');
 
       const interval = Math.max(2, Math.floor(durationSeconds / 50)); // ~50 frames
-      
+
       // Tạo ảnh sprite dạng grid
       await execa('ffmpeg', [
-        '-i', inputPath,
-        '-vf', `fps=1/${interval},scale=160:90,tile=10x5`,
-        '-q:v', '3',
+        '-i',
+        inputPath,
+        '-vf',
+        `fps=1/${interval},scale=160:90,tile=10x5`,
+        '-q:v',
+        '3',
         '-y',
         spritePath,
       ]);

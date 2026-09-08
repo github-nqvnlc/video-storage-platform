@@ -5,7 +5,9 @@ import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { Visibility, VideoStatus } from '@prisma/client';
 
 export class SearchVideoDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Từ khóa tìm kiếm (tiêu đề, mô tả, tags)' })
+  @ApiPropertyOptional({
+    description: 'Từ khóa tìm kiếm (tiêu đề, mô tả, tags)',
+  })
   @IsOptional()
   @IsString()
   q?: string;
@@ -20,12 +22,17 @@ export class SearchVideoDto extends PaginationQueryDto {
   @IsEnum(Visibility)
   visibility?: Visibility;
 
-  @ApiPropertyOptional({ enum: VideoStatus, description: 'Lọc theo trạng thái xử lý' })
+  @ApiPropertyOptional({
+    enum: VideoStatus,
+    description: 'Lọc theo trạng thái xử lý',
+  })
   @IsOptional()
   @IsEnum(VideoStatus)
   status?: VideoStatus;
 
-  @ApiPropertyOptional({ description: 'Sắp xếp: createdAt:desc, viewCount:desc, durationSeconds:asc' })
+  @ApiPropertyOptional({
+    description: 'Sắp xếp: createdAt:desc, viewCount:desc, durationSeconds:asc',
+  })
   @IsOptional()
   @IsString()
   sort?: string;

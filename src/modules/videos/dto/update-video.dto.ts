@@ -14,12 +14,18 @@ export class UpdateVideoDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ enum: Visibility, description: 'Chế độ hiển thị: PUBLIC, UNLISTED, PRIVATE' })
+  @ApiPropertyOptional({
+    enum: Visibility,
+    description: 'Chế độ hiển thị: PUBLIC, UNLISTED, PRIVATE',
+  })
   @IsOptional()
   @IsEnum(Visibility)
   visibility?: Visibility;
 
-  @ApiPropertyOptional({ description: 'Danh sách tags cập nhật', example: ['dulich', 'vietnam'] })
+  @ApiPropertyOptional({
+    description: 'Danh sách tags cập nhật',
+    example: ['dulich', 'vietnam'],
+  })
   @IsOptional()
   @IsArray()
   tags?: string[];

@@ -6,7 +6,7 @@ import { Logger } from '@nestjs/common';
 async function bootstrap() {
   const logger = new Logger('WorkerBootstrap');
   const app = await NestFactory.createApplicationContext(WorkerModule);
-  
+
   logger.log('====================================================');
   logger.log('  WINDY STORAGE - TRANSCODING WORKER IS RUNNING     ');
   logger.log('  Listening for video-transcode BullMQ jobs...      ');

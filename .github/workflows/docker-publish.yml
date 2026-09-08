@@ -41,7 +41,16 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Verify TypeScript & Build NestJS App
+      - name: 1️⃣ Check TypeScript Types (Typecheck)
+        run: npm run typecheck
+
+      - name: 2️⃣ Check Code Linting (ESLint)
+        run: npm run lint
+
+      - name: 3️⃣ Check Code Formatting (Prettier)
+        run: npm run format:check
+
+      - name: 4️⃣ Verify Build NestJS App
         run: npm run build
 
   # ============================================================================

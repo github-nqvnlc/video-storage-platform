@@ -42,7 +42,9 @@ async function bootstrap() {
   // Swagger Documentation
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Windy Storage - Video CRUDS API')
-    .setDescription('Hệ thống API quản lý, lưu trữ, xử lý transcode HLS và phân phối video với MinIO')
+    .setDescription(
+      'Hệ thống API quản lý, lưu trữ, xử lý transcode HLS và phân phối video với MinIO',
+    )
     .setVersion('1.0.0')
     .addTag('Videos', 'Quản lý Video, Upload Intent, HLS Playback, Search')
     .build();
@@ -53,7 +55,9 @@ async function bootstrap() {
   await app.listen(port);
   logger.log(`====================================================`);
   logger.log(`  WINDY STORAGE API RUNNING ON: http://localhost:${port}`);
-  logger.log(`  SWAGGER DOCS AVAILABLE AT:   http://localhost:${port}/${apiPrefix}/docs`);
+  logger.log(
+    `  SWAGGER DOCS AVAILABLE AT:   http://localhost:${port}/${apiPrefix}/docs`,
+  );
   logger.log(`====================================================`);
 }
 

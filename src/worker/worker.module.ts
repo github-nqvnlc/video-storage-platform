@@ -21,10 +21,6 @@ import { TranscodeProcessor } from './transcode.processor';
     SearchModule,
     QueueModule,
   ],
-  providers: [
-    FFmpegService,
-    StorageCleanerService,
-    TranscodeProcessor,
-  ],
+  providers: [FFmpegService, StorageCleanerService, TranscodeProcessor],
 })
 export class WorkerModule {}

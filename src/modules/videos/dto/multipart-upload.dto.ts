@@ -12,12 +12,18 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class InitiateMultipartUploadDto {
-  @ApiProperty({ description: 'Tiêu đề video ban đầu', example: 'Video 4K du lịch' })
+  @ApiProperty({
+    description: 'Tiêu đề video ban đầu',
+    example: 'Video 4K du lịch',
+  })
   @IsString()
   @IsNotEmpty()
   title: string;
 
-  @ApiProperty({ description: 'Tên file gốc bao gồm phần mở rộng', example: 'huge_video.mp4' })
+  @ApiProperty({
+    description: 'Tên file gốc bao gồm phần mở rộng',
+    example: 'huge_video.mp4',
+  })
   @IsString()
   @IsNotEmpty()
   originalFilename: string;
@@ -27,7 +33,10 @@ export class InitiateMultipartUploadDto {
   @IsNotEmpty()
   mimeType: string;
 
-  @ApiPropertyOptional({ description: 'Kích thước file tính theo bytes', example: 2147483648 })
+  @ApiPropertyOptional({
+    description: 'Kích thước file tính theo bytes',
+    example: 2147483648,
+  })
   @IsOptional()
   @IsNumber()
   @Min(1)
@@ -38,13 +47,19 @@ export class InitiateMultipartUploadDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Danh sách tags', example: ['4k', 'travel'] })
+  @ApiPropertyOptional({
+    description: 'Danh sách tags',
+    example: ['4k', 'travel'],
+  })
   @IsOptional()
   tags?: string[];
 }
 
 export class GetPartPresignedUrlDto {
-  @ApiProperty({ description: 'Upload ID từ S3 Multipart', example: 'xxx-upload-id' })
+  @ApiProperty({
+    description: 'Upload ID từ S3 Multipart',
+    example: 'xxx-upload-id',
+  })
   @IsString()
   @IsNotEmpty()
   uploadId: string;
@@ -61,25 +76,37 @@ export class MultipartPartDto {
   @Min(1)
   PartNumber: number;
 
-  @ApiProperty({ description: 'ETag trả về từ header response khi upload part', example: '"e59ff97941044f85df5297e1c302d260"' })
+  @ApiProperty({
+    description: 'ETag trả về từ header response khi upload part',
+    example: '"e59ff97941044f85df5297e1c302d260"',
+  })
   @IsString()
   @IsNotEmpty()
   ETag: string;
 }
 
 export class CompleteMultipartUploadDto {
-  @ApiProperty({ description: 'Upload ID từ S3 Multipart', example: 'xxx-upload-id' })
+  @ApiProperty({
+    description: 'Upload ID từ S3 Multipart',
+    example: 'xxx-upload-id',
+  })
   @IsString()
   @IsNotEmpty()
   uploadId: string;
 
-  @ApiProperty({ description: 'Danh sách các Parts đã upload kèm ETag', type: [MultipartPartDto] })
+  @ApiProperty({
+    description: 'Danh sách các Parts đã upload kèm ETag',
+    type: [MultipartPartDto],
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => MultipartPartDto)
   parts: MultipartPartDto[];
 
-  @ApiPropertyOptional({ description: 'Kích thước file thực tế tính theo bytes', example: 2147483648 })
+  @ApiPropertyOptional({
+    description: 'Kích thước file thực tế tính theo bytes',
+    example: 2147483648,
+  })
   @IsOptional()
   @IsNumber()
   @Min(1)
@@ -87,7 +114,10 @@ export class CompleteMultipartUploadDto {
 }
 
 export class AbortMultipartUploadDto {
-  @ApiProperty({ description: 'Upload ID từ S3 Multipart', example: 'xxx-upload-id' })
+  @ApiProperty({
+    description: 'Upload ID từ S3 Multipart',
+    example: 'xxx-upload-id',
+  })
   @IsString()
   @IsNotEmpty()
   uploadId: string;

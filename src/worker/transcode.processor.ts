@@ -7,7 +7,11 @@ import { MinioService } from '../modules/minio/minio.service';
 import { SearchService } from '../modules/search/search.service';
 import { FFmpegService } from './ffmpeg.service';
 import { StorageCleanerService } from './storage-cleaner.service';
-import { TRANSCODE_QUEUE, TranscodeJobData, CleanStorageJobData } from '../modules/queue/transcode-queue.service';
+import {
+  TRANSCODE_QUEUE,
+  TranscodeJobData,
+  CleanStorageJobData,
+} from '../modules/queue/transcode-queue.service';
 import { VideoStatus } from '@prisma/client';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -33,7 +37,9 @@ export class TranscodeProcessor extends WorkerHost {
       case 'transcode':
         return await this.handleTranscodeJob(job as Job<TranscodeJobData>);
       case 'clean-storage':
-        return await this.cleaner.cleanVideoStorage(job.data as CleanStorageJobData);
+        return await this.cleaner.cleanVideoStorage(
+          job.data as CleanStorageJobData,
+        );
       default:
         this.logger.warn(`Unknown job name: ${job.name}`);
     }
@@ -45,7 +51,10 @@ export class TranscodeProcessor extends WorkerHost {
 
     const baseTempDir = process.env.TEMP_STORAGE_DIR || '/tmp/windy-transcode';
     const workDir = path.join(baseTempDir, videoId);
-    const rawLocalPath = path.join(workDir, 'raw_video' + path.extname(rawStorageKey));
+    const rawLocalPath = path.join(
+      workDir,
+      'raw_video' + path.extname(rawStorageKey),
+    );
     const hlsLocalDir = path.join(workDir, 'hls');
 
     await fs.ensureDir(workDir);
@@ -53,8 +62,14 @@ export class TranscodeProcessor extends WorkerHost {
 
     try {
       // 1. Tải video gốc từ MinIO về máy
-      this.logger.log(`[1/5] Downloading raw video from MinIO: ${rawStorageKey}`);
-      await this.minio.downloadToFile(this.minio.rawBucket, rawStorageKey, rawLocalPath);
+      this.logger.log(
+        `[1/5] Downloading raw video from MinIO: ${rawStorageKey}`,
+      );
+      await this.minio.downloadToFile(
+        this.minio.rawBucket,
+        rawStorageKey,
+        rawLocalPath,
+      );
 
       // 2. Bóc tách thông số kỹ thuật (ffprobe)
       this.logger.log(`[2/5] Probing video metadata...`);
@@ -66,20 +81,39 @@ export class TranscodeProcessor extends WorkerHost {
 
       // 4. Trích xuất Thumbnail & Storyboard Sprite
       this.logger.log(`[4/5] Extracting thumbnail & storyboard...`);
-      const thumbTimestamp = Math.min(5, Math.floor(meta.durationSeconds * 0.2));
+      const thumbTimestamp = Math.min(
+        5,
+        Math.floor(meta.durationSeconds * 0.2),
+      );
       const thumbLocalPath = path.join(hlsLocalDir, 'thumbnail.jpg');
-      await this.ffmpeg.generateThumbnail(rawLocalPath, thumbLocalPath, thumbTimestamp);
+      await this.ffmpeg.generateThumbnail(
+        rawLocalPath,
+        thumbLocalPath,
+        thumbTimestamp,
+      );
 
-      const spriteResult = await this.ffmpeg.generateSpritePreview(rawLocalPath, hlsLocalDir, meta.durationSeconds);
+      const spriteResult = await this.ffmpeg.generateSpritePreview(
+        rawLocalPath,
+        hlsLocalDir,
+        meta.durationSeconds,
+      );
 
       // 5. Upload toàn bộ output HLS lên MinIO bucket `hls-videos`
-      this.logger.log(`[5/5] Uploading HLS chunks & assets to MinIO: ${videoId}/...`);
+      this.logger.log(
+        `[5/5] Uploading HLS chunks & assets to MinIO: ${videoId}/...`,
+      );
       const hlsMinioPrefix = `${videoId}`;
-      await this.minio.uploadDirectory(this.minio.hlsBucket, hlsMinioPrefix, hlsLocalDir);
+      await this.minio.uploadDirectory(
+        this.minio.hlsBucket,
+        hlsMinioPrefix,
+        hlsLocalDir,
+      );
 
       const hlsMasterKey = `${videoId}/master.m3u8`;
       const thumbnailKey = `${videoId}/thumbnail.jpg`;
-      const previewSpriteKey = spriteResult ? `${videoId}/storyboard.vtt` : null;
+      const previewSpriteKey = spriteResult
+        ? `${videoId}/storyboard.vtt`
+        : null;
 
       // 6. Cập nhật trạng thái video sang READY trong Postgres
       const updatedVideo = await this.prisma.video.update({
@@ -111,19 +145,27 @@ export class TranscodeProcessor extends WorkerHost {
         createdAt: updatedVideo.createdAt.getTime(),
       });
 
-      this.logger.log(`Transcode job completed successfully for video: ${videoId}`);
+      this.logger.log(
+        `Transcode job completed successfully for video: ${videoId}`,
+      );
       return { success: true, videoId };
     } catch (error) {
       const cleanReason = this.extractCleanErrorMessage(error);
-      this.logger.error(`Transcode failed for video ${videoId}: ${cleanReason}`);
+      this.logger.error(
+        `Transcode failed for video ${videoId}: ${cleanReason}`,
+      );
 
-      await this.prisma.video.update({
-        where: { id: videoId },
-        data: {
-          status: VideoStatus.FAILED,
-          failureReason: cleanReason,
-        },
-      }).catch((dbErr) => this.logger.error('DB update failed on error state:', dbErr));
+      await this.prisma.video
+        .update({
+          where: { id: videoId },
+          data: {
+            status: VideoStatus.FAILED,
+            failureReason: cleanReason,
+          },
+        })
+        .catch((dbErr) =>
+          this.logger.error('DB update failed on error state:', dbErr),
+        );
 
       throw error;
     } finally {
@@ -138,7 +180,10 @@ export class TranscodeProcessor extends WorkerHost {
   private extractCleanErrorMessage(error: any): string {
     const raw = (error?.stderr || error?.message || String(error)).trim();
 
-    if (raw.includes('matches no streams') || raw.includes("Failed to set value 'a:0'")) {
+    if (
+      raw.includes('matches no streams') ||
+      raw.includes("Failed to set value 'a:0'")
+    ) {
       return 'File video không có track âm thanh hoặc định dạng stream không hợp lệ';
     }
     if (raw.includes('Invalid data found when processing input')) {
@@ -152,8 +197,19 @@ export class TranscodeProcessor extends WorkerHost {
     }
 
     // Lấy 1 dòng lỗi ngắn gọn nhất
-    const lines = raw.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0 && !l.startsWith('ffmpeg version') && !l.startsWith('configuration:'));
-    const errorLine = lines.find((l: string) => l.toLowerCase().includes('error') || l.toLowerCase().includes('failed'));
+    const lines = raw
+      .split('\n')
+      .map((l: string) => l.trim())
+      .filter(
+        (l: string) =>
+          l.length > 0 &&
+          !l.startsWith('ffmpeg version') &&
+          !l.startsWith('configuration:'),
+      );
+    const errorLine = lines.find(
+      (l: string) =>
+        l.toLowerCase().includes('error') || l.toLowerCase().includes('failed'),
+    );
     if (errorLine) {
       return errorLine.slice(0, 160);
     }

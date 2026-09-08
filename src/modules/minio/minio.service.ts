@@ -31,16 +31,34 @@ export class MinioService implements OnModuleInit {
   public readonly publicUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.rawBucket = this.configService.get<string>('minio.rawBucket', 'raw-videos');
-    this.hlsBucket = this.configService.get<string>('minio.hlsBucket', 'hls-videos');
-    this.publicUrl = this.configService.get<string>('minio.publicUrl', 'http://localhost:9000');
+    this.rawBucket = this.configService.get<string>(
+      'minio.rawBucket',
+      'raw-videos',
+    );
+    this.hlsBucket = this.configService.get<string>(
+      'minio.hlsBucket',
+      'hls-videos',
+    );
+    this.publicUrl = this.configService.get<string>(
+      'minio.publicUrl',
+      'http://localhost:9000',
+    );
 
     this.s3Client = new S3Client({
-      endpoint: this.configService.get<string>('minio.endpoint', 'http://localhost:9000'),
+      endpoint: this.configService.get<string>(
+        'minio.endpoint',
+        'http://localhost:9000',
+      ),
       region: this.configService.get<string>('minio.region', 'us-east-1'),
       credentials: {
-        accessKeyId: this.configService.get<string>('minio.accessKey', 'minioadmin'),
-        secretAccessKey: this.configService.get<string>('minio.secretKey', 'minio_secure_password_2026'),
+        accessKeyId: this.configService.get<string>(
+          'minio.accessKey',
+          'minioadmin',
+        ),
+        secretAccessKey: this.configService.get<string>(
+          'minio.secretKey',
+          'minio_secure_password_2026',
+        ),
       },
       forcePathStyle: true, // MinIO bắt buộc dùng path style
     });
@@ -57,7 +75,9 @@ export class MinioService implements OnModuleInit {
     try {
       await this.ensureBucket(this.rawBucket, false);
       await this.ensureBucket(this.hlsBucket, true);
-      this.logger.log(`MinIO Buckets & CORS initialized: [${this.rawBucket}], [${this.hlsBucket}]`);
+      this.logger.log(
+        `MinIO Buckets & CORS initialized: [${this.rawBucket}], [${this.hlsBucket}]`,
+      );
     } catch (error) {
       this.logger.warn(`MinIO bucket init check: ${error.message}`);
     }
@@ -90,7 +110,9 @@ export class MinioService implements OnModuleInit {
         }),
       );
     } catch (corsErr) {
-      this.logger.warn(`Failed to set CORS on ${bucketName}: ${corsErr.message}`);
+      this.logger.warn(
+        `Failed to set CORS on ${bucketName}: ${corsErr.message}`,
+      );
     }
 
     if (isPublic) {
@@ -107,12 +129,14 @@ export class MinioService implements OnModuleInit {
           },
         ],
       };
-      await this.s3Client.send(
-        new PutBucketPolicyCommand({
-          Bucket: bucketName,
-          Policy: JSON.stringify(policy),
-        }),
-      ).catch(() => {});
+      await this.s3Client
+        .send(
+          new PutBucketPolicyCommand({
+            Bucket: bucketName,
+            Policy: JSON.stringify(policy),
+          }),
+        )
+        .catch(() => {});
     }
   }
 
@@ -231,7 +255,9 @@ export class MinioService implements OnModuleInit {
         UploadId: uploadId,
       });
       await this.s3Client.send(command);
-      this.logger.log(`Aborted multipart upload: [${bucket}] ${key} (UploadId: ${uploadId})`);
+      this.logger.log(
+        `Aborted multipart upload: [${bucket}] ${key} (UploadId: ${uploadId})`,
+      );
     } catch (error) {
       this.logger.warn(`Failed to abort multipart upload: ${error.message}`);
     }
@@ -240,7 +266,11 @@ export class MinioService implements OnModuleInit {
   /**
    * Tải 1 object từ MinIO về file local
    */
-  async downloadToFile(bucket: string, key: string, localFilePath: string): Promise<void> {
+  async downloadToFile(
+    bucket: string,
+    key: string,
+    localFilePath: string,
+  ): Promise<void> {
     const command = new GetObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -262,7 +292,12 @@ export class MinioService implements OnModuleInit {
   /**
    * Upload file từ Buffer trực tiếp lên MinIO
    */
-  async uploadBuffer(bucket: string, key: string, buffer: Buffer, contentType?: string): Promise<void> {
+  async uploadBuffer(
+    bucket: string,
+    key: string,
+    buffer: Buffer,
+    contentType?: string,
+  ): Promise<void> {
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -275,7 +310,12 @@ export class MinioService implements OnModuleInit {
   /**
    * Upload 1 file đơn lẻ lên MinIO
    */
-  async uploadFile(bucket: string, key: string, filePath: string, contentType?: string): Promise<void> {
+  async uploadFile(
+    bucket: string,
+    key: string,
+    filePath: string,
+    contentType?: string,
+  ): Promise<void> {
     const fileStream = fs.createReadStream(filePath);
     const command = new PutObjectCommand({
       Bucket: bucket,
@@ -289,7 +329,11 @@ export class MinioService implements OnModuleInit {
   /**
    * Upload toàn bộ thư mục (chứa .m3u8 và các file .ts) lên MinIO
    */
-  async uploadDirectory(bucket: string, baseKey: string, localDirPath: string): Promise<void> {
+  async uploadDirectory(
+    bucket: string,
+    baseKey: string,
+    localDirPath: string,
+  ): Promise<void> {
     const files = await fs.readdir(localDirPath);
 
     for (const file of files) {
@@ -337,7 +381,10 @@ export class MinioService implements OnModuleInit {
 
       this.logger.log(`Deleted folder prefix: [${bucket}] ${prefix}`);
     } catch (error) {
-      this.logger.error(`Failed to delete folder [${bucket}] ${prefix}:`, error.message);
+      this.logger.error(
+        `Failed to delete folder [${bucket}] ${prefix}:`,
+        error.message,
+      );
     }
   }
 
@@ -346,9 +393,14 @@ export class MinioService implements OnModuleInit {
    */
   async deleteFile(bucket: string, key: string): Promise<void> {
     try {
-      await this.s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      await this.s3Client.send(
+        new DeleteObjectCommand({ Bucket: bucket, Key: key }),
+      );
     } catch (error) {
-      this.logger.error(`Failed to delete file [${bucket}] ${key}:`, error.message);
+      this.logger.error(
+        `Failed to delete file [${bucket}] ${key}:`,
+        error.message,
+      );
     }
   }
 
