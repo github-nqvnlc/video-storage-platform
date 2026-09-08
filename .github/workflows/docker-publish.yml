@@ -1,6 +1,5 @@
-name: Build and Push Docker Images to Docker Hub
+name: CI / CD Pipeline - Validate & Publish Docker Hub
 
-# Kích hoạt khi push code kèm tag phiên bản (ví dụ: v1.0.0, v1.0.1) hoặc trigger thủ công
 on:
   push:
     branches:
@@ -8,6 +7,9 @@ on:
     tags:
       - 'v*.*.*'
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag:
@@ -16,13 +18,41 @@ on:
         default: 'latest'
 
 jobs:
-  build-and-push:
-    name: Build & Push Video Storage Images
+  # ============================================================================
+  # 1. CI JOB: Kiểm tra mã nguồn, cài dependencies, generate Prisma & Build
+  # ============================================================================
+  ci-check:
+    name: 🧪 CI Code Check & Build Verification
     runs-on: ubuntu-latest
 
-    # Chỉ push lên Docker Hub khi có git tag hoặc trigger qua workflow_dispatch
-    env:
-      SHOULD_PUSH: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Verify TypeScript & Build NestJS App
+        run: npm run build
+
+  # ============================================================================
+  # 2. CD JOB: Đóng gói Docker Images & Push lên Docker Hub (Chỉ chạy khi CI PASS)
+  # ============================================================================
+  cd-docker-publish:
+    name: 🚀 CD Build & Publish to Docker Hub
+    needs: ci-check
+    runs-on: ubuntu-latest
+    # Chỉ xuất bản Docker Image khi có Git Tag (ví dụ: v1.0.0) hoặc trigger thủ công
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository
@@ -35,7 +65,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: env.SHOULD_PUSH == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -54,14 +83,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-            type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+            type=ref,event=tag
 
       - name: Build and push API Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.api
-          push: ${{ env.SHOULD_PUSH == 'true' }}
+          push: true
           tags: ${{ steps.meta_api.outputs.tags }}
           labels: ${{ steps.meta_api.outputs.labels }}
           cache-from: type=gha
@@ -80,14 +109,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-            type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+            type=ref,event=tag
 
       - name: Build and push Worker Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.worker
-          push: ${{ env.SHOULD_PUSH == 'true' }}
+          push: true
           tags: ${{ steps.meta_worker.outputs.tags }}
           labels: ${{ steps.meta_worker.outputs.labels }}
           cache-from: type=gha
