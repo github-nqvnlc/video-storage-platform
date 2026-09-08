@@ -597,7 +597,7 @@ async function handleUploadSubmit(e) {
           if (info.isCompleting) {
             progressText.textContent = `Đang hoàn tất ghép file trên MinIO (99%)...`;
           } else {
-            const partInfo = info.totalParts > 1 ? ` (Mảnh ${info.partNumber}/${info.totalParts})` : '';
+            const partInfo = info.totalParts > 1 ? ` (${info.completedParts || 0}/${info.totalParts} mảnh, 4 luồng song song)` : '';
             progressText.textContent = `Đang tải lên MinIO${partInfo}: ${info.percent}%...`;
           }
         }

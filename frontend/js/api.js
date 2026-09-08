@@ -176,13 +176,13 @@ const api = {
   },
 
   /**
-   * Upload video dung lượng lớn (2GB+) theo cơ chế S3 Multipart / Chunks
-   * (Mỗi chunk 15MB, vượt qua giới hạn 100MB Cloudflare & không tràn RAM)
+   * Upload video dung lượng lớn (2GB+) theo cơ chế S3 Multipart ĐA LUỒNG (Concurrent Chunks)
+   * Tối ưu hóa băng thông bằng cách tải song song 4 luồng (chunks) cùng lúc + tự động retry nếu chập chờn
    */
-  async uploadLargeVideoMultipart(file, meta, onProgress) {
+  async uploadLargeVideoMultipart(file, meta, onProgress, concurrency = 4) {
     if (!file) throw new Error('Không tìm thấy file để upload');
 
-    const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB mỗi chunk
+    const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB mỗi chunk (chuẩn Cloudflare < 100MB)
     const totalParts = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
     
     // 1. Khởi tạo Multipart Upload
@@ -198,14 +198,30 @@ const api = {
     const videoId = initData.videoId;
     const uploadId = initData.uploadId;
     const uploadedParts = [];
+    const partLoadedBytes = new Array(totalParts + 1).fill(0);
+    let completedCount = 0;
 
-    try {
-      for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
-        const start = (partNumber - 1) * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunk = file.slice(start, end);
+    const updateOverallProgress = () => {
+      if (!onProgress) return;
+      const totalLoaded = partLoadedBytes.reduce((acc, bytes) => acc + bytes, 0);
+      const overallPercent = Math.min(99, Math.round((totalLoaded / file.size) * 100));
+      onProgress({
+        percent: overallPercent,
+        completedParts: completedCount,
+        totalParts,
+        loaded: totalLoaded,
+        total: file.size,
+      });
+    };
 
-        // Lấy Presigned URL cho part này
+    // Upload 1 Part kèm cơ chế Retry 3 lần nếu có gián đoạn mạng
+    const uploadSinglePart = async (partNumber, attempt = 1) => {
+      const start = (partNumber - 1) * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+      const chunkSize = end - start;
+
+      try {
         const partUrlData = await this.getMultipartPartUrl(videoId, {
           uploadId,
           partNumber,
@@ -213,23 +229,14 @@ const api = {
 
         const targetUrl = this.normalizeUploadUrl(partUrlData.presignedUrl);
 
-        // Upload chunk qua XHR để bắt ETag và theo dõi tiến trình
         const etag = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', targetUrl, true);
 
           xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable && onProgress) {
-              const currentChunkLoaded = e.loaded;
-              const totalLoadedSoFar = start + currentChunkLoaded;
-              const overallPercent = Math.min(99, Math.round((totalLoadedSoFar / file.size) * 100));
-              onProgress({
-                percent: overallPercent,
-                partNumber,
-                totalParts,
-                loaded: totalLoadedSoFar,
-                total: file.size,
-              });
+            if (e.lengthComputable) {
+              partLoadedBytes[partNumber] = e.loaded;
+              updateOverallProgress();
             }
           };
 
@@ -237,42 +244,63 @@ const api = {
             if (xhr.status >= 200 && xhr.status < 300) {
               let rawETag = xhr.getResponseHeader('ETag') || xhr.getResponseHeader('etag');
               if (!rawETag) {
-                // Một số proxy có thể không trả ETag header, fallback lấy từ response
                 rawETag = `"${partNumber}"`;
               }
-              resolve(rawETag.replace(/^W\//, '')); // Loại bỏ Weak ETag nếu có
+              resolve(rawETag.replace(/^W\//, ''));
             } else {
               reject(new Error(`Tải lên mảnh ${partNumber}/${totalParts} thất bại (HTTP ${xhr.status})`));
             }
           };
 
-          xhr.onerror = () => reject(new Error(`Lỗi kết nối mạng khi tải lên mảnh ${partNumber}/${totalParts}`));
+          xhr.onerror = () => reject(new Error(`Lỗi kết nối khi tải lên mảnh ${partNumber}/${totalParts}`));
+          xhr.ontimeout = () => reject(new Error(`Hết thời gian tải lên mảnh ${partNumber}/${totalParts}`));
           xhr.send(chunk);
         });
 
-        uploadedParts.push({
+        partLoadedBytes[partNumber] = chunkSize;
+        completedCount++;
+        updateOverallProgress();
+
+        return {
           PartNumber: partNumber,
           ETag: etag,
-        });
-
-        if (onProgress) {
-          const totalLoadedSoFar = end;
-          const overallPercent = Math.min(99, Math.round((totalLoadedSoFar / file.size) * 100));
-          onProgress({
-            percent: overallPercent,
-            partNumber,
-            totalParts,
-            loaded: totalLoadedSoFar,
-            total: file.size,
-          });
+        };
+      } catch (err) {
+        if (attempt < 3) {
+          console.warn(`[Multipart] Thử lại mảnh ${partNumber} (lần ${attempt + 1})...`);
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+          return await uploadSinglePart(partNumber, attempt + 1);
         }
+        throw err;
       }
+    };
+
+    try {
+      // 2. Chạy Pool Worker Đa Luồng (Mặc định 4 luồng song song)
+      const partQueue = Array.from({ length: totalParts }, (_, i) => i + 1);
+      const activeWorkers = [];
+
+      const worker = async () => {
+        while (partQueue.length > 0) {
+          const partNum = partQueue.shift();
+          if (partNum === undefined) break;
+          const res = await uploadSinglePart(partNum);
+          uploadedParts.push(res);
+        }
+      };
+
+      const workerCount = Math.min(concurrency, totalParts);
+      for (let i = 0; i < workerCount; i++) {
+        activeWorkers.push(worker());
+      }
+
+      await Promise.all(activeWorkers);
 
       // 3. Hoàn tất ghép file Multipart trên MinIO
       if (onProgress) {
         onProgress({
           percent: 99,
-          partNumber: totalParts,
+          completedParts: totalParts,
           totalParts,
           isCompleting: true,
         });
@@ -287,7 +315,7 @@ const api = {
       if (onProgress) {
         onProgress({
           percent: 100,
-          partNumber: totalParts,
+          completedParts: totalParts,
           totalParts,
           isFinished: true,
         });
