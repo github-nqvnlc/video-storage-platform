@@ -1,0 +1,94 @@
+name: Build and Push Docker Images to Docker Hub
+
+# Kích hoạt khi push code kèm tag phiên bản (ví dụ: v1.0.0, v1.0.1) hoặc trigger thủ công
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag thủ công (ví dụ: v1.0.0 hoặc latest)'
+        required: false
+        default: 'latest'
+
+jobs:
+  build-and-push:
+    name: Build & Push Video Storage Images
+    runs-on: ubuntu-latest
+
+    # Chỉ push lên Docker Hub khi có git tag hoặc trigger qua workflow_dispatch
+    env:
+      SHOULD_PUSH: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (Hỗ trợ đa kiến trúc)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.SHOULD_PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ------------------------------------------------------------------------
+      # 1. Image API Server (video-storage-api)
+      # ------------------------------------------------------------------------
+      - name: Extract metadata for API
+        id: meta_api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/video-storage-api
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+            type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Build and push API Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.api
+          push: ${{ env.SHOULD_PUSH == 'true' }}
+          tags: ${{ steps.meta_api.outputs.tags }}
+          labels: ${{ steps.meta_api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ------------------------------------------------------------------------
+      # 2. Image Transcoding Worker (video-storage-worker)
+      # ------------------------------------------------------------------------
+      - name: Extract metadata for Worker
+        id: meta_worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/video-storage-worker
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+            type=ref,event=branch,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Build and push Worker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.worker
+          push: ${{ env.SHOULD_PUSH == 'true' }}
+          tags: ${{ steps.meta_worker.outputs.tags }}
+          labels: ${{ steps.meta_worker.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
